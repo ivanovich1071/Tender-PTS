@@ -100,7 +100,21 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="Разведка структуры icetrade.by")
     ap.add_argument("--proxy", default="", help="socks5://user:pass@host:port")
     ap.add_argument("--base", default=BASE)
+    ap.add_argument("--timeout", type=int, default=12, help="таймаут запроса, сек")
     args = ap.parse_args()
+
+    if args.proxy and ("user:pass" in args.proxy or "host:port" in args.proxy):
+        print("В --proxy остался образец из инструкции. Подставьте настоящие "
+              "адрес, порт и, если нужны, логин с паролем.")
+        return 2
+
+    if args.proxy.startswith("socks"):
+        try:
+            import socks  # noqa: F401
+        except ImportError:
+            print("Для socks-прокси нужен PySocks:")
+            print('    .venv\\Scripts\\python.exe -m pip install "requests[socks]"')
+            return 2
 
     OUT.mkdir(parents=True, exist_ok=True)
     s = make_session(args.proxy or None)
@@ -115,13 +129,23 @@ def main() -> int:
     report += ["", "| путь | ответ | размер | заметка |", "|---|---|---|---|"]
 
     saved = 0
+    dead = 0
     for path in CANDIDATE_PATHS:
         url = urljoin(args.base, path)
-        code, text, note = fetch(s, url)
+        code, text, note = fetch(s, url, timeout=args.timeout)
         size = len(text or "")
         mark = "—" if code is None else str(code)
+        note = note.split("(Caused by")[0].strip()[:90]
         print(f"  {mark:>4}  {size:>8}  {path}  {note}")
         report.append(f"| `{path}` | {mark} | {size} | {note} |")
+
+        # Если сервер не отвечает вовсе, перебирать остальные пути незачем:
+        # каждый стоит полного таймаута, а ответ уже понятен.
+        dead = dead + 1 if code is None else 0
+        if dead >= 3:
+            print("\n  сервер не отвечает — остальные пути не проверяю")
+            report.append("| … | — | — | сервер не отвечает, перебор прекращён |")
+            break
 
         if code == 200 and size > 500:
             name = re.sub(r"[^A-Za-z0-9]+", "_", path).strip("_") or "root"
