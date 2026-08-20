@@ -117,6 +117,13 @@ td.num, th.num { text-align: right; }
             border-radius: var(--radius); margin-bottom: 6px;
             display: flex; justify-content: space-between; gap: 10px; }
 .files .kind { font-size: 11px; color: var(--muted); }
+.file-actions { display: flex; align-items: center; gap: 10px; white-space: nowrap; }
+.file-status { font-size: 11px; }
+.file-status.ok { color: var(--green); }
+.file-status.warn { color: var(--muted); }
+.file-status.err { color: var(--red); }
+button.dl, .small-btn { padding: 2px 9px; font-size: 12px; }
+#card-pane h2 .small-btn { margin-left: 10px; text-transform: none; letter-spacing: 0; }
 
 a { color: var(--accent); }
 .decide { display: flex; gap: 8px; margin: 18px 0 6px; }
@@ -134,3 +141,8 @@ dialog input, dialog textarea { width: 100%; margin-top: 4px; padding: 6px 8px;
 dialog menu { display: flex; justify-content: flex-end; gap: 8px; padding: 0; margin: 18px 0 0; }
 .thr { display: grid; grid-template-columns: 1fr 90px 90px; gap: 8px; align-items: center;
        margin-bottom: 6px; font-size: 13px; }
+dialog label.inline { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+dialog label.inline input { width: auto; margin: 0; }
+dialog code { background: #eef1f5; padding: 1px 5px; border-radius: 4px; font-size: 12px; }
+.ok-text { color: var(--green); }
+.err-text { color: var(--red); }

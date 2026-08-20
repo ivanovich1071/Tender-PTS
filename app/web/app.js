@@ -102,9 +102,15 @@ async function openLot(id) {
   const r = await api('/api/lots/' + id);
 
   const files = (r.files || []).map((f) => `
-    <li>
+    <li data-idx="${f.idx}">
       <span>${esc(f.name || 'файл')} <span class="kind">${ext(f.name)}</span></span>
-      <a href="${esc(f.url)}" target="_blank" rel="noopener">открыть</a>
+      <span class="file-actions">
+        <span class="file-status ${f.status === 'готов' ? 'ok' : 'warn'}">${f.local ? 'скачан' : esc(f.status === 'new' ? '' : f.status || '')}</span>
+        ${f.local
+          ? `<a href="/api/files/${esc(r.purchase_id)}/${f.idx}" target="_blank" rel="noopener">открыть</a>`
+          : `<a href="${esc(f.url)}" target="_blank" rel="noopener">на площадке</a>`}
+        <button class="dl" data-idx="${f.idx}">скачать</button>
+      </span>
     </li>`).join('') || '<li class="muted">Документы к закупке не приложены</li>';
 
   const siblings = (r.siblings || []).map((s) => `
@@ -141,7 +147,9 @@ async function openLot(id) {
     <table><thead><tr><th>№</th><th>Наименование</th><th class="num">Количество</th><th class="num">Сумма, BYN</th></tr></thead>
     <tbody>${siblings}</tbody></table>
 
-    <h2>Документация</h2>
+    <h2>Документация
+      ${(r.files || []).length ? '<button id="dl-all" class="ghost small-btn">скачать всё</button>' : ''}
+    </h2>
     <ul class="files">${files}</ul>
 
     <h2>Ссылки</h2>
@@ -159,6 +167,22 @@ async function openLot(id) {
     <div class="decided">${r.decision ? 'Решение: ' + DECISIONS[r.decision] : 'Решение не принято'}</div>
   `;
 
+  $('#card-pane').querySelectorAll('.dl').forEach((b) => {
+    b.onclick = () => downloadFile(r.purchase_id, b.dataset.idx, b);
+  });
+  const all = $('#dl-all');
+  if (all) {
+    all.onclick = async () => {
+      all.disabled = true;
+      all.textContent = 'качаю…';
+      const res = await api(`/api/purchases/${r.purchase_id}/download`, { method: 'POST' });
+      all.disabled = false;
+      all.textContent = 'скачать всё';
+      if (res.failed) alert(`Скачано ${res.downloaded} из ${res.total}. ${res.status}`);
+      openLot(id);
+    };
+  }
+
   $('#card-pane').querySelectorAll('.decide button').forEach((b) => {
     b.onclick = async () => {
       await api(`/api/lots/${id}/decision`, {
@@ -173,6 +197,31 @@ async function openLot(id) {
   });
 }
 
+async function downloadFile(purchaseId, idx, btn) {
+  const li = btn.closest('li');
+  const status = li.querySelector('.file-status');
+  btn.disabled = true;
+  status.className = 'file-status warn';
+  status.textContent = 'качаю…';
+  try {
+    const res = await api(`/api/files/${purchaseId}/${idx}/download`, { method: 'POST' });
+    if (res.ok) {
+      status.className = 'file-status ok';
+      status.textContent = `скачан, ${Math.round((res.size || 0) / 1024)} КБ`;
+      const link = li.querySelector('a');
+      link.href = `/api/files/${purchaseId}/${idx}`;
+      link.textContent = 'открыть';
+    } else {
+      status.className = 'file-status err';
+      status.textContent = res.status;
+    }
+  } catch (e) {
+    status.className = 'file-status err';
+    status.textContent = 'ошибка запроса';
+  }
+  btn.disabled = false;
+}
+
 // --- настройки -----------------------------------------------------------
 
 $('#open-settings').onclick = async () => {
@@ -181,6 +230,9 @@ $('#open-settings').onclick = async () => {
   $('#s-mindays').value = s.min_working_days;
   $('#s-pause').value = s.request_pause;
   $('#s-proxy').value = s.proxy || '';
+  $('#src-gias').checked = !!(s.sources || {}).gias;
+  $('#src-icetrade').checked = !!(s.sources || {}).icetrade;
+  $('#icetrade-status').textContent = '';
   $('#s-holidays').value = (s.holidays || []).join(', ');
   $('#s-weekends').value = (s.working_weekends || []).join(', ');
   $('#thresholds').innerHTML = Object.entries(s.price_thresholds).map(([k, v]) => `
@@ -209,12 +261,35 @@ $('#save-settings').onclick = async () => {
       min_working_days: Number($('#s-mindays').value),
       request_pause: Number($('#s-pause').value),
       proxy: $('#s-proxy').value.trim(),
+      sources: { gias: $('#src-gias').checked, icetrade: $('#src-icetrade').checked },
       price_thresholds: thresholds,
       holidays: list($('#s-holidays').value),
       working_weekends: list($('#s-weekends').value),
     }),
   });
   refreshState();
+};
+
+$('#check-icetrade').onclick = async () => {
+  const out = $('#icetrade-status');
+  out.textContent = ' проверяю…';
+  out.className = '';
+  // Прокси мог быть только что вписан и ещё не сохранён — сохраняем перед проверкой.
+  await api('/api/settings', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ proxy: $('#s-proxy').value.trim() }),
+  });
+  try {
+    const r = await api('/api/sources/icetrade/check', { method: 'POST' });
+    out.className = r.ok ? 'ok-text' : 'err-text';
+    out.textContent = r.ok
+      ? ` доступен, страница ${r.size} байт${r.proxy ? ' (через прокси)' : ''}`
+      : ' ' + r.reason;
+  } catch (e) {
+    out.className = 'err-text';
+    out.textContent = ' ошибка запроса';
+  }
 };
 
 // --- мелочи --------------------------------------------------------------

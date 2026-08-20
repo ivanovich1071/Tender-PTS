@@ -54,6 +54,17 @@
       <input type="text" id="s-proxy" placeholder="socks5://user:pass@host:port">
     </label>
 
+    <h3>Площадки</h3>
+    <label class="inline"><input type="checkbox" id="src-gias"> ГИАС — госзакупки РБ</label>
+    <label class="inline"><input type="checkbox" id="src-icetrade"> icetrade.by — закупки за собственные средства</label>
+    <p class="muted small">
+      icetrade закрыт для адресов вне Беларуси и требует прокси. Разбор его
+      страниц включается только после разведки:
+      <code>python recon/icetrade_probe.py --proxy …</code>
+      <button type="button" id="check-icetrade" class="ghost small-btn">проверить доступ</button>
+      <span id="icetrade-status"></span>
+    </p>
+
     <h3>Пороги оценки, $ за кг</h3>
     <p class="muted small">Работает с шага 3, когда масса читается с чертежа.
        Дешевле «зелёного» — выгодно, дороже «красного» — нет.</p>

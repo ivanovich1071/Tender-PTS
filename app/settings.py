@@ -23,6 +23,19 @@ DEFAULTS: dict = {
     "proxy": "",                # пусто = без прокси; напр. socks5://user:pass@host:port
     "request_pause": 0.4,       # пауза между запросами к площадке, сек
 
+    # icetrade.by закрыт для адресов вне Беларуси, поэтому пути к страницам
+    # снимаются разведкой (recon/icetrade_probe.py) и правятся здесь, без кода.
+    # structure_confirmed включается вручную, когда разбор проверен на живых
+    # страницах: до этого источник намеренно отказывается работать, чтобы не
+    # выдавать выдумку за данные.
+    "icetrade": {
+        "base": "https://icetrade.by",
+        "search_path": "/search/auctions?search_text={query}",
+        "card_path": "/auction/{id}",
+        "allow_insecure_tls": True,
+        "structure_confirmed": False,
+    },
+
     # Оценка $/кг: пороги по группам работ, доллары за килограмм.
     # green — дешевле или равно, red — дороже или равно, между ними жёлтый.
     "price_thresholds": {

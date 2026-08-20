@@ -183,3 +183,62 @@ def parse_card(card: dict, uuid: str) -> tuple[dict, list[dict], list[dict]]:
 
 def is_active_state(state: str | None) -> bool:
     return (state or "").strip().lower() in ACTIVE_STATES
+
+
+class GiasSource:
+    """Источник в общем интерфейсе (app/sources/base.py)."""
+
+    name = "gias"
+    title = "ГИАС — госзакупки РБ"
+
+    def harvest(self, profile, cfg: dict, progress=None, cancelled=None):
+        from datetime import datetime, timedelta, timezone
+
+        from app import calendar_by
+
+        def say(msg: str) -> None:
+            if progress:
+                progress(f"ГИАС · {msg}")
+
+        def stop() -> bool:
+            return bool(cancelled and cancelled())
+
+        api = Gias(proxy=cfg.get("proxy", ""),
+                   pause=float(cfg.get("request_pause", 0.4)))
+        window = int(cfg.get("window_days", 30))
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=window)).timestamp() * 1000
+
+        queries = [text for text, _ in profile.queries()]
+        queries += [o["query"] for o in profile.organizers]
+
+        # Выдача поиска уже содержит состояние и срок подачи, поэтому неактуальное
+        # отсеивается до загрузки карточек: закрытых процедур кратно больше, а
+        # карточка каждой стоит отдельного запроса.
+        candidates: dict[str, dict] = {}
+        skipped = 0
+        for i, query in enumerate(queries, 1):
+            if stop():
+                return
+            say(f"поиск {i}/{len(queries)}: {query}")
+            for item in api.find_items(query, cutoff):
+                if not is_active_state(item.get("stateName")):
+                    continue
+                if not calendar_by.is_actual(item.get("requestDate"), cfg):
+                    skipped += 1
+                    continue
+                candidates.setdefault(item["purchaseGiasId"], item)
+
+        say(f"актуальных {len(candidates)}, отсеяно по сроку {skipped}")
+        for i, uuid in enumerate(candidates, 1):
+            if stop():
+                return
+            if i % 10 == 0 or i == 1:
+                say(f"карточки {i}/{len(candidates)}")
+            card = api.card(uuid)
+            if not card:
+                continue
+            purchase, lots, files = parse_card(card, uuid)
+            purchase["days_left"] = calendar_by.days_left(purchase["deadline_ms"], cfg)
+            yield purchase, lots, files
+
+        self.calls = api.calls

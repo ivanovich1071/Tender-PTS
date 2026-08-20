@@ -10,7 +10,7 @@ from pathlib import Path
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 
-from app import calendar_by, jobs, profile as profile_mod, settings, store
+from app import calendar_by, documents, jobs, profile as profile_mod, settings, store
 
 WEB = Path(__file__).resolve().parent / "web"
 
@@ -114,6 +114,44 @@ async def lot_decision(lot_id: str, request: Request) -> dict:
     finally:
         conn.close()
     return {"ok": True}
+
+
+@app.post("/api/files/{purchase_id}/{idx}/download")
+def file_download(purchase_id: str, idx: int) -> dict:
+    conn = store.connect()
+    try:
+        return documents.download_one(conn, purchase_id, idx)
+    finally:
+        conn.close()
+
+
+@app.post("/api/purchases/{purchase_id}/download")
+def purchase_download(purchase_id: str) -> dict:
+    conn = store.connect()
+    try:
+        return documents.download_purchase(conn, purchase_id)
+    finally:
+        conn.close()
+
+
+@app.get("/api/files/{purchase_id}/{idx}")
+def file_open(purchase_id: str, idx: int):
+    """Отдать скачанный файл. Открывается в приложении, а не на площадке."""
+    conn = store.connect()
+    try:
+        path = documents.local_path(conn, purchase_id, idx)
+    finally:
+        conn.close()
+    if not path:
+        return JSONResponse({"error": "файл ещё не скачан"}, status_code=404)
+    return FileResponse(path, filename=path.name)
+
+
+@app.post("/api/sources/icetrade/check")
+def icetrade_check() -> dict:
+    """Проверка доступа к icetrade: отвечает ли площадка с текущим прокси."""
+    from app.sources.icetrade import Icetrade
+    return Icetrade(settings.read()).check()
 
 
 @app.get("/api/settings")
