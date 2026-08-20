@@ -112,6 +112,14 @@ th { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: v
 tr:last-child td { border-bottom: 0; }
 td.num, th.num { text-align: right; }
 
+/* Проверка площадок и путь к журналу — их читают и переписывают руками,
+   поэтому моноширинный шрифт и выделяемый текст. */
+.checks { width: 100%; margin: 6px 0; }
+.checks td { padding: 4px 8px; font-size: 12px; border-bottom: 0; }
+.log-path { font-family: ui-monospace, Consolas, monospace; font-size: 11px;
+            padding: 8px 10px; background: var(--panel); border: 1px solid var(--line);
+            border-radius: var(--radius); word-break: break-all; user-select: all; }
+
 /* Контакты заказчика: адрес для КП обычно спрятан в требованиях к участникам,
    поэтому переносы строк сохраняются как есть. */
 .contacts { margin-top: 8px; padding: 8px 10px; background: var(--panel);

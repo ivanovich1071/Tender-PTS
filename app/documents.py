@@ -16,7 +16,7 @@ from pathlib import Path
 
 import requests
 
-from app import settings, store
+from app import logs, settings, store
 
 DOCS = settings.ROOT / "work" / "docs"
 MAX_BYTES = 80 * 1024 * 1024        # 80 МБ: тендерные архивы бывают крупными
@@ -110,6 +110,7 @@ def download_one(conn, purchase_id: str, idx: int, sess=None) -> dict:
         return {"ok": False, "status": status}
 
     _mark(conn, purchase_id, idx, str(target), done)
+    logs.log.info("файл %s: %s, %s КБ", row["name"], done, round(size / 1024))
     return {"ok": True, "status": done, "size": size, "local": target.name}
 
 
@@ -117,6 +118,8 @@ def download_purchase(conn, purchase_id: str) -> dict:
     """Скачать всю документацию закупки одним нажатием."""
     rows = store.files_of(conn, purchase_id)
     sess = session()
+    logs.log.info("скачиваю документацию закупки %s: файлов %s",
+                  purchase_id, len(rows))
     done, failed, status = 0, 0, ""
     for row in rows:
         res = download_one(conn, purchase_id, row["idx"], sess)
@@ -125,7 +128,9 @@ def download_purchase(conn, purchase_id: str) -> dict:
         else:
             failed += 1
             status = res["status"]
+            logs.log.warning("файл %s не скачан: %s", row["name"], status)
     conn.commit()
+    logs.log.info("закупка %s: скачано %s из %s", purchase_id, done, len(rows))
     return {"downloaded": done, "failed": failed, "total": len(rows),
             "status": status}
 

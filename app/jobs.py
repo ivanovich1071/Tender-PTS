@@ -10,7 +10,7 @@ import threading
 import traceback
 from dataclasses import dataclass, field
 
-from app import collector, store
+from app import collector, logs, store
 
 
 @dataclass
@@ -55,22 +55,29 @@ def start() -> dict:
     return state()
 
 
+def _progress(message: str) -> None:
+    _current.message = message
+    logs.log.info(message)
+
+
 def _run() -> None:
     conn = store.connect()
     run_id = store.start_run(conn)
     conn.close()
+    logs.log.info("--- сбор начат ---")
     try:
-        stats = collector.collect(
-            progress=lambda m: setattr(_current, "message", m),
-            cancelled=_cancel.is_set,
-        )
+        stats = collector.collect(progress=_progress, cancelled=_cancel.is_set)
         _current.stats = stats
         _current.status = "cancelled" if _cancel.is_set() else "done"
         _current.message = "отменено" if _cancel.is_set() else "готово"
+        logs.run_result(stats)
+        logs.log.info("--- сбор %s ---", _current.message)
     except Exception as e:
         _current.status = "error"
         _current.error = f"{type(e).__name__}: {e}"
         _current.message = "ошибка"
+        # Полная трассировка нужна именно в файле: разбираться будут не здесь.
+        logs.log.exception("сбор упал: %s", _current.error)
         traceback.print_exc()
     finally:
         conn = store.connect()

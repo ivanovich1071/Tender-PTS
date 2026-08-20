@@ -61,9 +61,12 @@
       На icetrade лежат закупки крупных заводов — того, чего в ГИАС нет вовсе.
       Площадка закрыта для адресов вне Беларуси: без белорусского прокси она
       отвечает 403, и сбор по ней не пойдёт.
-      <button type="button" id="check-icetrade" class="ghost small-btn">проверить доступ</button>
-      <span id="icetrade-status"></span>
     </p>
+    <p class="muted small">
+      <button type="button" id="check-sites" class="ghost small-btn">проверить площадки</button>
+      достучится до всех четырёх хостов и запишет результат в журнал.
+    </p>
+    <div id="sites-status"></div>
 
     <h3>Пороги оценки, $ за кг</h3>
     <p class="muted small">Работает с шага 3, когда масса читается с чертежа.
@@ -78,6 +81,13 @@
     <label>Рабочие субботы
       <textarea id="s-weekends" rows="1"></textarea>
     </label>
+
+    <h3>Журнал</h3>
+    <p class="muted small">
+      Всё, что делает приложение, пишется в файл — его и надо переслать, если
+      что-то пошло не так. Новый файл заводится на каждый запуск.
+    </p>
+    <div class="log-path" id="log-path"></div>
 
     <menu>
       <button value="cancel" class="ghost">Закрыть</button>

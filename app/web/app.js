@@ -13,11 +13,13 @@ const SOURCES = { gias: 'ГИАС', icetrade: 'icetrade', butb: 'БУТБ' };
 let decision = 'new';
 let currentLot = null;
 let poll = null;
+let logPath = '';
 
 // --- статус и сбор -------------------------------------------------------
 
 async function refreshState() {
   const s = await api('/api/state');
+  logPath = s.log || '';
   const p = s.profile;
   $('#profile-info').textContent =
     `профиль ${p.version} · ${p.keywords} слов · ${p.groups} групп · заказчики: ${p.organizers.join(', ')}`;
@@ -245,7 +247,8 @@ $('#open-settings').onclick = async () => {
   $('#s-proxy').value = s.proxy || '';
   $('#src-gias').checked = !!(s.sources || {}).gias;
   $('#src-icetrade').checked = !!(s.sources || {}).icetrade;
-  $('#icetrade-status').textContent = '';
+  $('#sites-status').innerHTML = '';
+  $('#log-path').textContent = logPath || 'журнал ещё не заведён';
   $('#s-holidays').value = (s.holidays || []).join(', ');
   $('#s-weekends').value = (s.working_weekends || []).join(', ');
   $('#thresholds').innerHTML = Object.entries(s.price_thresholds).map(([k, v]) => `
@@ -283,10 +286,9 @@ $('#save-settings').onclick = async () => {
   refreshState();
 };
 
-$('#check-icetrade').onclick = async () => {
-  const out = $('#icetrade-status');
-  out.textContent = ' проверяю…';
-  out.className = '';
+$('#check-sites').onclick = async () => {
+  const out = $('#sites-status');
+  out.innerHTML = '<div class="muted small">проверяю, это займёт до минуты…</div>';
   // Прокси мог быть только что вписан и ещё не сохранён — сохраняем перед проверкой.
   await api('/api/settings', {
     method: 'PUT',
@@ -294,14 +296,17 @@ $('#check-icetrade').onclick = async () => {
     body: JSON.stringify({ proxy: $('#s-proxy').value.trim() }),
   });
   try {
-    const r = await api('/api/sources/icetrade/check', { method: 'POST' });
-    out.className = r.ok ? 'ok-text' : 'err-text';
-    out.textContent = r.ok
-      ? ` доступен, страница ${r.size} байт${r.proxy ? ' (через прокси)' : ''}`
-      : ' ' + r.reason;
+    const r = await api('/api/diagnostics', { method: 'POST' });
+    const rows = r.checks.map((c) => `
+      <tr><td>${esc(c.host)}</td>
+          <td class="${c.ok ? 'ok-text' : 'err-text'}">${c.ok ? 'отвечает' : 'нет'}</td>
+          <td class="muted small">${esc(c.why)} · ${esc(c.note)}</td></tr>`).join('');
+    out.innerHTML = `
+      <table class="checks"><tbody>${rows}</tbody></table>
+      <div class="verdict small">${esc(r.verdict)}</div>
+      <div class="muted small">прокси: ${esc(r.proxy)} · записано в журнал</div>`;
   } catch (e) {
-    out.className = 'err-text';
-    out.textContent = ' ошибка запроса';
+    out.innerHTML = '<div class="err-text small">не удалось выполнить проверку</div>';
   }
 };
 

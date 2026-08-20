@@ -10,11 +10,17 @@ from pathlib import Path
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 
-from app import calendar_by, documents, jobs, profile as profile_mod, settings, store
+from app import (calendar_by, documents, jobs, logs, profile as profile_mod,
+                 settings, store)
 
 WEB = Path(__file__).resolve().parent / "web"
 
 app = FastAPI(title="Tender-PTS", docs_url=None, redoc_url=None)
+
+
+@app.on_event("startup")
+def _open_log() -> None:
+    logs.setup()
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -49,6 +55,7 @@ def state() -> dict:
         "job": jobs.state(),
         "counts": counts,
         "last_run": last,
+        "log": str(logs.path() or ""),
         "profile": {
             "version": prof.raw.get("version"),
             "groups": len(prof.groups),
@@ -147,11 +154,66 @@ def file_open(purchase_id: str, idx: int):
     return FileResponse(path, filename=path.name)
 
 
-@app.post("/api/sources/icetrade/check")
-def icetrade_check() -> dict:
-    """Проверка доступа к icetrade: отвечает ли площадка с текущим прокси."""
-    from app.sources.icetrade import Icetrade
-    return Icetrade(settings.read()).check()
+# Четыре хоста, из которых состоит вся работа. Два закрыты по региону, и понять,
+# «изнутри» ли запущено приложение, иначе никак.
+HOSTS = [
+    ("gias.by", "https://gias.by/", "ГИАС — данные госзакупок"),
+    ("goszakupki.by", "https://goszakupki.by/", "файлы документации"),
+    ("icetrade.by", "https://icetrade.by/robots.txt",
+     "закупки за собственные средства"),
+    ("zakupki.butb.by", "https://zakupki.butb.by/auctions/reestrauctions.html", "БУТБ"),
+]
+
+
+@app.post("/api/diagnostics")
+def diagnostics() -> dict:
+    """Достучаться до всех площадок и записать результат в журнал.
+
+    Нужна тому, кто запускает приложение не там, где его писали: по одному
+    экрану видно, доступен ли рынок целиком или только его бюджетная часть.
+    """
+    import requests
+
+    cfg = settings.read()
+    proxy = (cfg.get("proxy") or "").strip()
+    proxies = {"http": proxy, "https": proxy} if proxy else None
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/126.0"}
+
+    logs.log.info("--- проверка площадок, прокси: %s ---", logs.mask_proxy(proxy))
+    checks = []
+    for host, url, why in HOSTS:
+        detail = ""
+        try:
+            # verify=False: icetrade не отдаёт промежуточный сертификат, а здесь
+            # важно, отвечает ли хост вообще, а не качество его цепочки.
+            r = requests.get(url, timeout=20, headers=headers, proxies=proxies,
+                             verify=False)
+            ok = r.status_code == 200
+            if ok:
+                note = f"ответил, страница {len(r.content)} байт"
+            elif r.status_code == 403:
+                note = "403 — адрес не из Беларуси"
+            else:
+                note = f"ответил {r.status_code}"
+        except Exception as e:
+            # Читать будет тот, кто запускает, а не тот, кто писал: подробности
+            # urllib3 ему ничего не скажут, поэтому они уходят в журнал.
+            ok = False
+            timeout = isinstance(e, (requests.exceptions.ConnectTimeout,
+                                     requests.exceptions.ReadTimeout))
+            note = ("не отвечает — похоже, закрыт по региону" if timeout
+                    else "не удалось соединиться")
+            detail = f"{type(e).__name__}: {str(e)[:120]}"
+        checks.append({"host": host, "why": why, "ok": ok, "note": note})
+        logs.log.info("  %-18s %s %s", host, "ок " if ok else "нет",
+                      f"{note} [{detail}]" if detail else note)
+
+    closed = [c["host"] for c in checks if not c["ok"]]
+    verdict = ("все площадки отвечают — виден весь рынок" if not closed
+               else "не отвечают: " + ", ".join(closed))
+    logs.log.info("вывод: %s", verdict)
+    return {"checks": checks, "verdict": verdict,
+            "proxy": logs.mask_proxy(proxy), "log": str(logs.path() or "")}
 
 
 @app.get("/api/settings")
