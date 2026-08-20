@@ -1,0 +1,47 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Приложение",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "app",
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
+      "name": "Приложение в отдельном окне",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "app",
+      "args": ["--window"],
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
+      "name": "Проверка прокси и площадок",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/recon/proxy_check.py",
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
+      "name": "Разведка icetrade",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/recon/icetrade_probe.py",
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
+      "name": "Разведка ГИАС за 90 дней",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/recon/gias_probe.py",
+      "args": ["--days", "90"],
+      "console": "integratedTerminal",
+      "justMyCode": false
+    }
+  ]
+}
