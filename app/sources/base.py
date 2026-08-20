@@ -21,10 +21,6 @@ class SourceError(RuntimeError):
     """Площадка недоступна или ответила не тем. Сбор по другим источникам продолжается."""
 
 
-class NotConfigured(SourceError):
-    """Источник ещё не настроен — например, не снята структура страниц."""
-
-
 class Source(Protocol):
     name: str
     title: str

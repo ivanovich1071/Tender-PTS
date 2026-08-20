@@ -73,3 +73,17 @@ def test_watched_organizer_recognised():
     assert matching.match_by_organizer(PROFILE, 'ОАО "Кузлитмаш"') is not None
     assert matching.match_by_organizer(PROFILE, 'ОАО "Амкодор-Унимод"') is not None
     assert matching.match_by_organizer(PROFILE, 'ГУ "Школа №5"') is None
+
+
+def test_unp_finds_the_customer_when_the_name_is_misspelled():
+    """Настоящий случай: на icetrade БМЗ записан как «металлургичекий», с опечаткой.
+
+    Совпадение по названию её не переживает, поэтому проверка идёт по УНП.
+    """
+    misspelled = ('Открытое акционерное общество "Белорусский металлургичекий '
+                  'завод-управляющая компания холдинга"')
+    assert matching.match_by_organizer(PROFILE, misspelled, "400074854") is not None
+
+
+def test_unp_of_a_stranger_does_not_match():
+    assert matching.match_by_organizer(PROFILE, 'ГУ "Школа №5"', "191234567") is None

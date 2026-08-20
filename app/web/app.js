@@ -8,6 +8,7 @@ const api = async (url, opts) => {
 };
 
 const DECISIONS = { participate: 'участвуем', skip: 'пропущен' };
+const SOURCES = { gias: 'ГИАС', icetrade: 'icetrade', butb: 'БУТБ' };
 
 let decision = 'new';
 let currentLot = null;
@@ -34,8 +35,16 @@ async function refreshState() {
     $('#job').textContent = 'ошибка: ' + job.error;
   } else if (job.stats && Object.keys(job.stats).length) {
     const st = job.stats;
-    $('#job').textContent =
-      `${st.saved_lots} лотов из ${st.active} актуальных · ${st.calls} запросов`;
+    // Разбивка по площадкам: «сколько закупок дала» и «сколько подошло профилю».
+    // Одна общая цифра тут врала — площадки считают актуальность каждая по-своему.
+    const bySource = Object.entries(st.sources || {})
+      .map(([name, v]) => `${SOURCES[name] || name} ${v.saved} из ${v.actual}`)
+      .join(' · ');
+    $('#job').textContent = [
+      `${st.saved_lots} лотов`, bySource,
+      st.duplicates ? `дублей ${st.duplicates}` : '',
+      `${st.calls} запросов`,
+    ].filter(Boolean).join(' · ');
   } else if (s.last_run && s.last_run.finished) {
     $('#job').textContent = 'последний сбор: ' + s.last_run.finished.replace('T', ' ').slice(0, 16);
   }
@@ -105,7 +114,7 @@ async function openLot(id) {
     <li data-idx="${f.idx}">
       <span>${esc(f.name || 'файл')} <span class="kind">${ext(f.name)}</span></span>
       <span class="file-actions">
-        <span class="file-status ${f.status === 'готов' ? 'ok' : 'warn'}">${f.local ? 'скачан' : esc(f.status === 'new' ? '' : f.status || '')}</span>
+        <span class="file-status ${f.local ? 'ok' : 'warn'}">${f.local ? 'скачан' : esc(f.status === 'new' ? '' : f.status || '')}</span>
         ${f.local
           ? `<a href="/api/files/${esc(r.purchase_id)}/${f.idx}" target="_blank" rel="noopener">открыть</a>`
           : `<a href="${esc(f.url)}" target="_blank" rel="noopener">на площадке</a>`}
@@ -134,9 +143,13 @@ async function openLot(id) {
       <div class="fact"><div class="k">Состояние</div><div class="v" style="font-size:13px">${esc(r.purchase_state || '')}</div></div>
     </div>
 
+    ${r.duplicate_of ? '<div class="muted small">Эта же закупка есть и на другой площадке — карточки различаются составом файлов.</div>' : ''}
+
     <h2>Заказчик</h2>
     <div>${esc(r.organizer || '—')}${r.unp ? ' · УНП ' + esc(r.unp) : ''}</div>
     <div class="muted small">${esc(r.location || '')}</div>
+    ${r.industry ? `<div class="muted small">Отрасль: ${esc(r.industry)}</div>` : ''}
+    ${r.contacts ? `<div class="contacts">${esc(r.contacts)}</div>` : ''}
 
     <h2>Почему отобрано</h2>
     <div>${esc(r.grp || '')} — ${esc(r.reason || '')}</div>
@@ -155,7 +168,7 @@ async function openLot(id) {
     <h2>Ссылки</h2>
     <div>
       ${r.auction_url ? `<a href="${esc(r.auction_url)}" target="_blank" rel="noopener">процедура на площадке</a> · ` : ''}
-      <a href="${esc(r.page_url)}" target="_blank" rel="noopener">карточка в ГИАС</a>
+      <a href="${esc(r.page_url)}" target="_blank" rel="noopener">карточка: ${esc(SOURCES[r.source] || 'площадка')}</a>
     </div>
 
     ${r.delivery ? `<h2>Поставка</h2><div>${esc(r.delivery)}</div>` : ''}

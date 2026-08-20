@@ -58,9 +58,9 @@
     <label class="inline"><input type="checkbox" id="src-gias"> ГИАС — госзакупки РБ</label>
     <label class="inline"><input type="checkbox" id="src-icetrade"> icetrade.by — закупки за собственные средства</label>
     <p class="muted small">
-      icetrade закрыт для адресов вне Беларуси и требует прокси. Разбор его
-      страниц включается только после разведки:
-      <code>python recon/icetrade_probe.py --proxy …</code>
+      На icetrade лежат закупки крупных заводов — того, чего в ГИАС нет вовсе.
+      Площадка закрыта для адресов вне Беларуси: без белорусского прокси она
+      отвечает 403, и сбор по ней не пойдёт.
       <button type="button" id="check-icetrade" class="ghost small-btn">проверить доступ</button>
       <span id="icetrade-status"></span>
     </p>

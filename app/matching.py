@@ -81,10 +81,24 @@ def match_lot(profile: Profile, lot_title: str, purchase_title: str = "",
     return Match(True, kind, groups[0], hits, reason)
 
 
-def match_by_organizer(profile: Profile, organizer: str) -> dict | None:
-    """Заказчик из списка наблюдения. Такие лоты берём независимо от слов."""
+def match_by_organizer(profile: Profile, organizer: str,
+                       unp: str | None = None) -> dict | None:
+    """Заказчик из списка наблюдения. Такие лоты берём независимо от слов.
+
+    Сначала по УНП, и только потом по названию. Название на площадке набирают
+    руками: БМЗ на icetrade значится как «Белорусский металлургичекий завод» —
+    с опечаткой, и совпадение по строке «белорусский металлургический» её не
+    ловит. УНП же не меняется и переживает и опечатки, и переименования.
+    """
+    if unp:
+        unp = str(unp).strip()
+        for item in profile.organizers:
+            if unp in [str(u) for u in item.get("unp", [])]:
+                return item
     low = (organizer or "").lower()
     for item in profile.organizers:
-        if item.get("match", "").lower() in low:
-            return item
+        names = item.get("match", "")
+        for name in [names] if isinstance(names, str) else names:
+            if name and name.lower() in low:
+                return item
     return None

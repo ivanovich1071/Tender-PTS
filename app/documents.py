@@ -63,12 +63,12 @@ def download_one(conn, purchase_id: str, idx: int, sess=None) -> dict:
                 "local": target.name}
 
     sess = sess or session()
-    try:
-        with sess.get(row["url"], timeout=TIMEOUT, stream=True) as r:
+
+    def fetch(verify: bool) -> int | str:
+        """Скачать в файл: число — размер, строка — отказ с объяснением."""
+        with sess.get(row["url"], timeout=TIMEOUT, stream=True, verify=verify) as r:
             if r.status_code != 200:
-                status = f"площадка ответила {r.status_code}"
-                _mark(conn, purchase_id, idx, None, status)
-                return {"ok": False, "status": status}
+                return f"площадка ответила {r.status_code}"
             target_dir.mkdir(parents=True, exist_ok=True)
             size = 0
             with target.open("wb") as f:
@@ -77,10 +77,24 @@ def download_one(conn, purchase_id: str, idx: int, sess=None) -> dict:
                     if size > MAX_BYTES:
                         f.close()
                         target.unlink(missing_ok=True)
-                        status = "файл больше 80 МБ, качайте вручную"
-                        _mark(conn, purchase_id, idx, None, status)
-                        return {"ok": False, "status": status}
+                        return "файл больше 80 МБ, качайте вручную"
                     f.write(chunk)
+        return size
+
+    done = "готов"
+    try:
+        try:
+            outcome = fetch(True)
+        except requests.exceptions.SSLError:
+            # icetrade.by не отдаёт промежуточный сертификат: рукопожатие проходит,
+            # а проверка цепочки падает. Документы там публичные, поэтому делается
+            # одна попытка без проверки — но оператор видит это в статусе файла.
+            outcome = fetch(False)
+            done = "готов, TLS без проверки"
+        if isinstance(outcome, str):
+            _mark(conn, purchase_id, idx, None, outcome)
+            return {"ok": False, "status": outcome}
+        size = outcome
     except requests.exceptions.ProxyError as e:
         status = f"прокси не отвечает: {str(e)[:80]}"
         _mark(conn, purchase_id, idx, None, status)
@@ -95,8 +109,8 @@ def download_one(conn, purchase_id: str, idx: int, sess=None) -> dict:
         _mark(conn, purchase_id, idx, None, status)
         return {"ok": False, "status": status}
 
-    _mark(conn, purchase_id, idx, str(target), "готов")
-    return {"ok": True, "status": "готов", "size": size, "local": target.name}
+    _mark(conn, purchase_id, idx, str(target), done)
+    return {"ok": True, "status": done, "size": size, "local": target.name}
 
 
 def download_purchase(conn, purchase_id: str) -> dict:

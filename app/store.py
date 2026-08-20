@@ -36,6 +36,10 @@ CREATE TABLE IF NOT EXISTS purchases (
     auction_url  TEXT,
     page_url     TEXT,
     days_left    INTEGER,
+    industry     TEXT,
+    contacts     TEXT,
+    etp_url      TEXT,
+    duplicate_of TEXT,
     first_seen   TEXT,
     last_seen    TEXT
 );
@@ -107,7 +111,25 @@ def connect() -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.executescript(SCHEMA)
+    _upgrade(conn)
     return conn
+
+
+def _upgrade(conn: sqlite3.Connection) -> None:
+    """Дописать колонки, появившиеся после создания базы.
+
+    CREATE TABLE IF NOT EXISTS не трогает уже существующую таблицу, поэтому у
+    того, кто собирал тендеры вчера, новых полей не будет — их добавляем сами.
+    """
+    have = {row["name"] for row in conn.execute("PRAGMA table_info(purchases)")}
+    for column in ("industry", "contacts", "etp_url", "duplicate_of"):
+        if column not in have:
+            conn.execute(f"ALTER TABLE purchases ADD COLUMN {column} TEXT")
+    conn.commit()
+
+
+# Поля, которых у ГИАС нет: площадки отдают разный набор, а строка в базе одна.
+PURCHASE_EXTRAS = {"industry": None, "contacts": None, "etp_url": None}
 
 
 def save_purchase(conn: sqlite3.Connection, p: dict, lots: list[dict],
@@ -116,15 +138,18 @@ def save_purchase(conn: sqlite3.Connection, p: dict, lots: list[dict],
     conn.execute(
         """INSERT INTO purchases (id, source, number, title, state, tender_form,
                organizer, unp, location, sum_lot, created_ms, updated_ms,
-               deadline_ms, auction_url, page_url, days_left, first_seen, last_seen)
+               deadline_ms, auction_url, page_url, days_left, industry, contacts,
+               etp_url, first_seen, last_seen)
            VALUES (:id, :source, :number, :title, :state, :tender_form, :organizer,
                :unp, :location, :sum_lot, :created_ms, :updated_ms, :deadline_ms,
-               :auction_url, :page_url, :days_left, :stamp, :stamp)
+               :auction_url, :page_url, :days_left, :industry, :contacts,
+               :etp_url, :stamp, :stamp)
            ON CONFLICT(id) DO UPDATE SET
                state=excluded.state, sum_lot=excluded.sum_lot,
                updated_ms=excluded.updated_ms, deadline_ms=excluded.deadline_ms,
-               days_left=excluded.days_left, last_seen=excluded.last_seen""",
-        {**p, "stamp": stamp},
+               days_left=excluded.days_left, contacts=excluded.contacts,
+               last_seen=excluded.last_seen""",
+        {**PURCHASE_EXTRAS, **p, "stamp": stamp},
     )
     conn.execute("DELETE FROM lots WHERE purchase_id = ?", (p["id"],))
     conn.executemany(
@@ -142,6 +167,34 @@ def save_purchase(conn: sqlite3.Connection, p: dict, lots: list[dict],
                    name=excluded.name, url=excluded.url""",
             files,
         )
+
+
+def mark_duplicates(conn: sqlite3.Connection) -> int:
+    """Пометить закупки, которые пришли с двух площадок сразу.
+
+    Госзакупка может лежать и в ГИАС, и на icetrade. Совпадением считается
+    один заказчик (УНП), одна и та же минута окончания подачи и одна сумма —
+    признак нарочно узкий: лучше пропустить дубль, чем склеить две разные
+    закупки одного завода. Дубль не удаляется: состав приложенных файлов у
+    площадок разный, и оператору важно видеть обе карточки.
+    """
+    conn.execute("UPDATE purchases SET duplicate_of = NULL")
+    rows = conn.execute(
+        """SELECT id, source, unp, deadline_ms, sum_lot, first_seen FROM purchases
+            WHERE unp IS NOT NULL AND deadline_ms IS NOT NULL AND sum_lot IS NOT NULL
+            ORDER BY first_seen, id""").fetchall()
+    primary: dict[tuple, str] = {}
+    marked = 0
+    for row in rows:
+        key = (row["unp"], row["deadline_ms"], round(row["sum_lot"], 2))
+        if key in primary and primary[key] != row["id"]:
+            conn.execute("UPDATE purchases SET duplicate_of = ? WHERE id = ?",
+                         (primary[key], row["id"]))
+            marked += 1
+        else:
+            primary[key] = row["id"]
+    conn.commit()
+    return marked
 
 
 def start_run(conn: sqlite3.Connection) -> int:
@@ -173,6 +226,7 @@ def last_run(conn: sqlite3.Connection) -> dict | None:
 LOT_LIST_SQL = """
 SELECT l.*, p.number, p.title AS purchase_title, p.organizer, p.unp, p.state AS purchase_state,
        p.tender_form, p.deadline_ms, p.days_left, p.auction_url, p.page_url, p.location,
+       p.source, p.industry, p.contacts, p.etp_url, p.duplicate_of,
        d.decision, d.note,
        dr.mass_kg, dr.material, dr.designation,
        (SELECT COUNT(*) FROM files f WHERE f.purchase_id = p.id) AS files_count

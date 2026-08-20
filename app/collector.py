@@ -62,12 +62,14 @@ def collect(progress=None, cancelled=None) -> dict:
             except Exception as e:
                 stats["errors"].append(
                     f"{source.title}: непредвиденная ошибка {type(e).__name__}: {e}")
-            stats["sources"][source.name] = {"actual": found, "saved": saved}
+            stats["sources"][source.name] = {
+                "title": source.title, "actual": found, "saved": saved}
             stats["calls"] += getattr(source, "calls", 0)
             stats["warnings"] += getattr(source, "warnings", [])
             if cancelled and cancelled():
                 break
         conn.commit()
+        stats["duplicates"] = store.mark_duplicates(conn)
     finally:
         conn.close()
 
@@ -78,7 +80,8 @@ def collect(progress=None, cancelled=None) -> dict:
 def _keep(conn, prof, purchase: dict, lots: list[dict], files: list[dict]) -> int:
     """Отобрать лоты закупки по профилю и записать. Возвращает число оставленных."""
     filenames = [f["name"] or "" for f in files]
-    watched = matching.match_by_organizer(prof, purchase.get("organizer"))
+    watched = matching.match_by_organizer(
+        prof, purchase.get("organizer"), purchase.get("unp"))
 
     kept = []
     for lot in lots:
