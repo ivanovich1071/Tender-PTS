@@ -28,6 +28,8 @@ from collections import Counter
 from pathlib import Path
 from urllib.parse import urljoin
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
 import requests
 import urllib3
 
@@ -103,10 +105,14 @@ def main() -> int:
     ap.add_argument("--timeout", type=int, default=12, help="таймаут запроса, сек")
     args = ap.parse_args()
 
-    if args.proxy and ("user:pass" in args.proxy or "host:port" in args.proxy):
-        print("В --proxy остался образец из инструкции. Подставьте настоящие "
-              "адрес, порт и, если нужны, логин с паролем.")
-        return 2
+    if args.proxy:
+        from proxy_check import validate          # noqa: PLC0415
+        problem = validate(args.proxy)
+        if problem:
+            print("Прокси задан неверно:", problem)
+            print("\nСначала проверьте прокси отдельно:")
+            print("    .venv\\Scripts\\python.exe recon\\proxy_check.py --proxy <строка>")
+            return 2
 
     if args.proxy.startswith("socks"):
         try:
