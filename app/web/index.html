@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tender-PTS</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<header>
+  <div class="brand">
+    <strong>Tender-PTS</strong>
+    <span class="muted" id="profile-info"></span>
+  </div>
+  <div class="actions">
+    <span id="job" class="job"></span>
+    <button id="collect" class="primary">Собрать тендеры</button>
+    <button id="cancel" hidden>Отменить</button>
+    <button id="open-settings" class="ghost">Настройки</button>
+  </div>
+</header>
+
+<nav id="tabs">
+  <button data-decision="new" class="on">Новые <span class="count" id="c-new">—</span></button>
+  <button data-decision="">Все <span class="count" id="c-all">—</span></button>
+  <button data-decision="participate">Участвуем</button>
+  <button data-decision="skip">Пропущены</button>
+</nav>
+
+<main>
+  <section id="list-pane">
+    <div id="list"></div>
+  </section>
+  <section id="card-pane">
+    <div class="empty">Выберите лот слева</div>
+  </section>
+</main>
+
+<dialog id="settings">
+  <form method="dialog">
+    <h2>Настройки</h2>
+
+    <label>Глубина сбора, дней
+      <input type="number" id="s-window" min="1" max="365">
+    </label>
+    <label>Минимальный запас до окончания подачи, рабочих дней
+      <input type="number" id="s-mindays" min="0" max="30">
+    </label>
+    <label>Пауза между запросами, сек
+      <input type="number" id="s-pause" min="0" max="5" step="0.1">
+    </label>
+    <label>Прокси (пусто — без прокси)
+      <input type="text" id="s-proxy" placeholder="socks5://user:pass@host:port">
+    </label>
+
+    <h3>Пороги оценки, $ за кг</h3>
+    <p class="muted small">Работает с шага 3, когда масса читается с чертежа.
+       Дешевле «зелёного» — выгодно, дороже «красного» — нет.</p>
+    <div id="thresholds"></div>
+
+    <h3>Праздники и переносы</h3>
+    <p class="muted small">Даты через запятую, формат ГГГГ-ММ-ДД. Влияет на счёт рабочих дней.</p>
+    <label>Праздники
+      <textarea id="s-holidays" rows="2"></textarea>
+    </label>
+    <label>Рабочие субботы
+      <textarea id="s-weekends" rows="1"></textarea>
+    </label>
+
+    <menu>
+      <button value="cancel" class="ghost">Закрыть</button>
+      <button id="save-settings" value="save" class="primary">Сохранить</button>
+    </menu>
+  </form>
+</dialog>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
