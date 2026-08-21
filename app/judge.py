@@ -26,6 +26,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 
 import requests
@@ -71,8 +72,28 @@ def mask_key(key: str) -> str:
     return f"{key[:7]}…{key[-4:]}"
 
 
+def api_key(cfg: dict) -> str:
+    """Ключ OpenRouter: сначала из настроек, потом из .env.
+
+    Два места нарочно. `.env` — привычное: его правят в редакторе, не запуская
+    приложение, и он же переживает переустановку. Поле в настройках сильнее,
+    чтобы вписанное руками не оказалось молча проигнорированным; интерфейс при
+    этом показывает, откуда ключ взят.
+    """
+    return ((cfg.get("openrouter_key") or "").strip()
+            or os.environ.get("OPENROUTER_API_KEY", "").strip())
+
+
+def key_source(cfg: dict) -> str:
+    if (cfg.get("openrouter_key") or "").strip():
+        return "настройки"
+    if os.environ.get("OPENROUTER_API_KEY", "").strip():
+        return ".env"
+    return ""
+
+
 def configured(cfg: dict) -> bool:
-    return bool((cfg.get("openrouter_key") or "").strip()) and bool(cfg.get("judge"))
+    return bool(api_key(cfg)) and bool(cfg.get("judge"))
 
 
 def _proxies(cfg: dict) -> dict | None:
@@ -139,7 +160,7 @@ def ask(cfg: dict, system: str, batch: list[dict]) -> list[dict]:
         ],
     }
     headers = {
-        "Authorization": f"Bearer {(cfg.get('openrouter_key') or '').strip()}",
+        "Authorization": f"Bearer {api_key(cfg)}",
         "Content-Type": "application/json",
         "X-Title": "Tender-PTS",
     }
@@ -217,7 +238,7 @@ def review(conn, prof, cfg: dict, progress=None) -> dict:
     if not configured(cfg):
         logs.log.warning(
             "отбор: модель не проверяла %s лотов — %s", len(pending),
-            "ключ OpenRouter не задан" if not (cfg.get("openrouter_key") or "").strip()
+            "ключ OpenRouter не задан" if not api_key(cfg)
             else "проверка моделью выключена в настройках")
         for row in pending:
             store.apply_verdict(conn, row["id"], "maybe", "моделью не проверено", "")

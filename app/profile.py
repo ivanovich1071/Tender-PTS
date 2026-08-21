@@ -16,8 +16,12 @@ from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
-PROFILE_FILE = ROOT / "profile.json"
+from app import settings
+
+# Профиль правят руками, поэтому в собранном приложении он лежит рядом с .exe,
+# а не внутри него. Вшитая копия нужна только на первый запуск.
+PROFILE_FILE = settings.ROOT / "profile.json"
+BUNDLED_PROFILE = settings.BUNDLE / "profile.json"
 
 # Порядок важен: двухбуквенные сочетания идут раньше одиночных букв.
 TRANSLIT = [
@@ -98,7 +102,13 @@ class Profile:
 
 
 def load(path: Path | None = None) -> Profile:
-    data = json.loads((path or PROFILE_FILE).read_text(encoding="utf-8"))
+    target = path or PROFILE_FILE
+    if not target.exists() and BUNDLED_PROFILE.exists():
+        # Первый запуск собранного приложения: выкладываем профиль наружу,
+        # чтобы его можно было править, не пересобирая .exe.
+        target.write_text(BUNDLED_PROFILE.read_text(encoding="utf-8"),
+                          encoding="utf-8")
+    data = json.loads(target.read_text(encoding="utf-8"))
     keywords: list[Keyword] = []
     for group, words in data.get("groups", {}).items():
         for word in words:

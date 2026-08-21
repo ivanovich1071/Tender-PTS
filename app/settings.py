@@ -6,14 +6,62 @@
 Календарь праздников вынесен сюда намеренно: в Беларуси переносы рабочих дней
 объявляются постановлением на каждый год, и оператор должен править список
 текстом, не трогая код.
+
+Ключи — отдельно от настроек, в `.env` в корне проекта. Файл в git не попадает
+(см. `.gitignore`), в журнал не пишется и в сборку не кладётся. Это привычное
+место: его правят в редакторе, не запуская приложение.
 """
 from __future__ import annotations
 
 import json
+import os
+import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+# В собранном .exe исходники распакованы во временную папку, и складывать туда
+# базу, журналы и ключ нельзя — при следующем запуске папка будет другая.
+# Поэтому рабочие файлы всегда лежат рядом с самим .exe.
+FROZEN = bool(getattr(sys, "frozen", False))
+ROOT = (Path(sys.executable).resolve().parent if FROZEN
+        else Path(__file__).resolve().parent.parent)
+BUNDLE = Path(getattr(sys, "_MEIPASS", ROOT))       # что вшито в сборку
+
 FILE = ROOT / "work" / "settings.json"
+ENV_FILE = ROOT / ".env"
+
+ENV_TEMPLATE = """# Ключи Tender-PTS. Файл в git не попадает и в сборку не кладётся.
+# Ключ OpenRouter — для отбора лотов моделью. Без него отбор идёт на правилах.
+# Взять на https://openrouter.ai/keys
+OPENROUTER_API_KEY=
+"""
+
+
+def load_env() -> None:
+    """Прочитать .env в переменные окружения. Заведёт пустой, если его нет.
+
+    Разбор нарочно свой и в десять строк: тянуть зависимость ради `KEY=value`
+    незачем, а лишний пакет в сборке — лишний вес.
+    """
+    if not ENV_FILE.exists():
+        try:
+            ENV_FILE.write_text(ENV_TEMPLATE, encoding="utf-8")
+        except OSError:
+            return                      # только для чтения — не беда, читаем окружение
+    try:
+        text = ENV_FILE.read_text(encoding="utf-8")
+    except OSError:
+        return
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        name, _, value = line.partition("=")
+        name, value = name.strip(), value.strip().strip('"').strip("'")
+        if name and value and not os.environ.get(name):
+            os.environ[name] = value
+
+
+load_env()
 
 DEFAULTS: dict = {
     # Сбор

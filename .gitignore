@@ -24,6 +24,11 @@ recon/out/
 .idea/*
 !.idea/runConfigurations/
 
+# Сборка десктопной версии: 37 МБ временных файлов, пересобирается командой
+# .venv/Scripts/python.exe build_desktop.py
+build/
+dist/
+
 # Прочее
 .DS_Store
 Thumbs.db

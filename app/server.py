@@ -272,7 +272,8 @@ def diagnostics() -> dict:
 def settings_get() -> dict:
     """Настройки для интерфейса. Ключ модели наружу отдаётся маскированным."""
     cfg = settings.read()
-    cfg["openrouter_key"] = judge.mask_key((cfg.get("openrouter_key") or "").strip())
+    cfg["key_source"] = judge.key_source(cfg)
+    cfg["openrouter_key"] = judge.mask_key(judge.api_key(cfg))
     return cfg
 
 

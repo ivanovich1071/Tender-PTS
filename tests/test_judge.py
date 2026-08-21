@@ -140,6 +140,7 @@ def test_operator_decision_outranks_the_model(tmp_path, monkeypatch):
 
 def test_without_a_key_nothing_is_lost(tmp_path, monkeypatch):
     """Ключа нет — сбор доходит до конца, лоты помечены «не проверено»."""
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
     conn = _db(tmp_path, monkeypatch, ["Барабан волочильный по чертежу"])
     stats = judge.review(conn, PROFILE, {"openrouter_key": "", "judge": True})
     row = conn.execute("SELECT verdict, verdict_why FROM lots WHERE id='l1'").fetchone()
@@ -235,3 +236,33 @@ def test_operator_marks_become_examples_for_the_model(tmp_path, monkeypatch):
 
     system = judge.build_prompt(PROFILE, store.examples(conn))
     assert "Кокцидиостатик" in system
+
+
+def test_key_is_read_from_env_when_settings_are_empty(monkeypatch):
+    """Ключ кладут в .env — там его правят в редакторе, не запуская приложение."""
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-v1-from-env")
+    assert judge.api_key({"openrouter_key": ""}) == "sk-or-v1-from-env"
+    assert judge.key_source({"openrouter_key": ""}) == ".env"
+    # Вписанное руками в настройках сильнее — иначе оно молча не работало бы.
+    assert judge.api_key({"openrouter_key": "sk-or-v1-typed"}) == "sk-or-v1-typed"
+    assert judge.key_source({"openrouter_key": "sk-or-v1-typed"}) == "настройки"
+
+
+def test_env_file_is_parsed(tmp_path, monkeypatch):
+    from app import settings as settings_mod
+    monkeypatch.setattr(settings_mod, "ENV_FILE", tmp_path / ".env")
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    (tmp_path / ".env").write_text(
+        '# комментарий\nOPENROUTER_API_KEY="sk-or-v1-quoted"\nПУСТО=\n',
+        encoding="utf-8")
+    settings_mod.load_env()
+    assert judge.api_key({}) == "sk-or-v1-quoted"
+
+
+def test_env_file_is_created_if_missing(tmp_path, monkeypatch):
+    """Чтобы ключ было куда вписать: пустой .env заводится сам."""
+    from app import settings as settings_mod
+    target = tmp_path / ".env"
+    monkeypatch.setattr(settings_mod, "ENV_FILE", target)
+    settings_mod.load_env()
+    assert target.exists() and "OPENROUTER_API_KEY=" in target.read_text(encoding="utf-8")

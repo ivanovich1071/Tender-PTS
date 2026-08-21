@@ -9,5 +9,12 @@ PySocks>=1.7            # socks5-прокси для белорусских пл
 # Pillow>=10.0
 # opencv-python-headless>=4.10
 
-# Оконный запуск (--window), необязателен
-# pywebview>=6.0
+# Десктопная версия: своё окно вместо браузера.
+# Нужен только для `python -m app --window` и для сборки .exe —
+# при обычном запуске через localhost не требуется.
+pywebview>=6.0
+
+# Сборка .exe. Ставится отдельно, в работе приложения не участвует:
+#   .venv/Scripts/python.exe -m pip install pyinstaller
+#   .venv/Scripts/python.exe build_desktop.py
+# pyinstaller>=6.0

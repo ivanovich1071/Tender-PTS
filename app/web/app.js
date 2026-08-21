@@ -306,7 +306,12 @@ $('#open-settings').onclick = async () => {
   $('#s-pause').value = s.request_pause;
   $('#s-proxy').value = s.proxy || '';
   $('#s-judge').checked = !!s.judge;
-  $('#s-key').value = s.openrouter_key === '(не задан)' ? '' : s.openrouter_key;
+  // Ключ показываем маской и не подставляем в поле: иначе сохранение затёрло бы
+  // настоящий ключ звёздочками. Зато видно, откуда он взят.
+  $('#s-key').value = '';
+  $('#key-source').textContent = s.key_source
+    ? `ключ есть, взят из «${s.key_source}»: ${s.openrouter_key}`
+    : 'ключа нет — впишите сюда или в файл .env в корне проекта';
   $('#s-model').value = s.model || '';
   $('#models-status').innerHTML = '';
   $('#src-gias').checked = !!(s.sources || {}).gias;
