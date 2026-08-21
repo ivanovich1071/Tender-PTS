@@ -37,6 +37,46 @@ def safe_name(name: str, idx: int) -> str:
     return f"{idx:02d}_{cleaned[:120]}"
 
 
+HTML_MARKS = (b"<!doctype html", b"<html", b"<!--", b"<head", b"<script")
+TITLE_RE = re.compile(rb"(?is)<title[^>]*>(.{0,200}?)</title>")
+
+
+def page_instead_of_file(content_type: str, head: bytes, name: str) -> str:
+    """Не файл, а веб-страница? Тогда объяснить, какая именно.
+
+    Так ведут себя закрытые по региону площадки: на запрос документа приходит
+    HTTP 200 и собственная главная страница. Раньше она молча ложилась на диск
+    под именем `.pdf`, оператор видел «скачан» — и получал «Не удалось загрузить
+    PDF-документ». Проверять надо содержимое, а не код ответа.
+    """
+    if (name or "").lower().endswith((".htm", ".html")):
+        return ""
+    low = head[:2048].lower()
+    looks_html = content_type.lower().startswith("text/html") or \
+        any(mark in low for mark in HTML_MARKS)
+    if not looks_html:
+        return ""
+    found = TITLE_RE.search(head[:4096])
+    title = ""
+    if found:
+        try:
+            title = found.group(1).decode("utf-8", "replace").strip()
+        except Exception:
+            title = ""
+    return f"площадка вернула страницу «{title}», а не файл" if title else \
+        "площадка вернула страницу, а не файл"
+
+
+def looks_broken(path: Path) -> bool:
+    """Уже лежащий на диске файл — на самом деле сохранённая веб-страница?"""
+    try:
+        with path.open("rb") as f:
+            head = f.read(2048)
+    except OSError:
+        return True
+    return bool(page_instead_of_file("", head, path.name))
+
+
 def session(cfg: dict | None = None) -> requests.Session:
     cfg = cfg or settings.read()
     s = requests.Session()
@@ -58,21 +98,40 @@ def download_one(conn, purchase_id: str, idx: int, sess=None) -> dict:
     target_dir = DOCS / purchase_id
     target = target_dir / safe_name(row["name"], idx)
     if target.exists() and target.stat().st_size:
-        _mark(conn, purchase_id, idx, str(target), "готов")
-        return {"ok": True, "status": "готов", "size": target.stat().st_size,
-                "local": target.name}
+        if not looks_broken(target):
+            _mark(conn, purchase_id, idx, str(target), "готов")
+            return {"ok": True, "status": "готов", "size": target.stat().st_size,
+                    "local": target.name}
+        # Осталось от прежних прогонов: под именем документа лежит HTML-страница.
+        target.unlink(missing_ok=True)
+        logs.log.warning("файл %s был сохранён как страница — качаю заново",
+                         row["name"])
 
     sess = sess or session()
+    # Площадка отдаёт документ тому, кто пришёл с карточки закупки, а не по
+    # голой ссылке, поэтому идём как браузер — с Referer и cookie сессии.
+    referer = _referer(conn, purchase_id)
 
     def fetch(verify: bool) -> int | str:
         """Скачать в файл: число — размер, строка — отказ с объяснением."""
-        with sess.get(row["url"], timeout=TIMEOUT, stream=True, verify=verify) as r:
+        headers = {"Referer": referer} if referer else {}
+        with sess.get(row["url"], timeout=TIMEOUT, stream=True, verify=verify,
+                      headers=headers) as r:
             if r.status_code != 200:
                 return f"площадка ответила {r.status_code}"
+            stream = r.iter_content(64 * 1024)
+            head = next(stream, b"")
+            refusal = page_instead_of_file(
+                r.headers.get("Content-Type", ""), head, row["name"])
+            if refusal:
+                return refusal
             target_dir.mkdir(parents=True, exist_ok=True)
             size = 0
             with target.open("wb") as f:
-                for chunk in r.iter_content(64 * 1024):
+                for chunk in ([head] if head else []):
+                    size += len(chunk)
+                    f.write(chunk)
+                for chunk in stream:
                     size += len(chunk)
                     if size > MAX_BYTES:
                         f.close()
@@ -120,6 +179,14 @@ def download_purchase(conn, purchase_id: str) -> dict:
     sess = session()
     logs.log.info("скачиваю документацию закупки %s: файлов %s",
                   purchase_id, len(rows))
+    # Сначала карточка — ради cookie сессии: по голой ссылке площадка отдаёт
+    # документ не всегда, а пришедшему со страницы закупки — отдаёт.
+    page = _referer(conn, purchase_id)
+    if page:
+        try:
+            sess.get(page, timeout=30, verify=False)
+        except Exception:
+            pass                       # не открылась — попробуем файлы как есть
     done, failed, status = 0, 0, ""
     for row in rows:
         res = download_one(conn, purchase_id, row["idx"], sess)
@@ -142,7 +209,22 @@ def local_path(conn, purchase_id: str, idx: int) -> Path | None:
     if not row or not row["local"]:
         return None
     path = Path(row["local"])
-    return path if path.is_file() else None
+    if not path.is_file():
+        return None
+    if looks_broken(path):
+        # Открывать нечего: под именем документа лежит страница площадки.
+        _mark(conn, purchase_id, idx, None, "площадка вернула страницу, а не файл")
+        logs.log.warning("файл %s оказался страницей, а не документом", path.name)
+        return None
+    return path
+
+
+def _referer(conn, purchase_id: str) -> str:
+    row = conn.execute("SELECT page_url, auction_url FROM purchases WHERE id = ?",
+                       (purchase_id,)).fetchone()
+    if not row:
+        return ""
+    return row["page_url"] or row["auction_url"] or ""
 
 
 def _mark(conn, purchase_id: str, idx: int, local: str | None, status: str) -> None:

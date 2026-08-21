@@ -26,10 +26,20 @@
   <button data-decision="">Все <span class="count" id="c-all">—</span></button>
   <button data-decision="participate">Участвуем</button>
   <button data-decision="skip">Пропущены</button>
+  <button data-decision="off">Мимо профиля <span class="count" id="c-off">—</span></button>
 </nav>
 
 <main>
   <section id="list-pane">
+    <div id="bulk">
+      <label class="inline"><input type="checkbox" id="pick-all"> выбрать</label>
+      <span id="picked" class="muted small"></span>
+      <span class="bulk-actions">
+        <button id="mark-off" class="ghost small-btn">мимо профиля</button>
+        <button id="mark-fit" class="ghost small-btn">вернуть в профиль</button>
+        <button id="drop" class="danger small-btn">удалить</button>
+      </span>
+    </div>
     <div id="list"></div>
   </section>
   <section id="card-pane">
@@ -67,6 +77,27 @@
       достучится до всех четырёх хостов и запишет результат в журнал.
     </p>
     <div id="sites-status"></div>
+
+    <h3>Отбор моделью</h3>
+    <p class="muted small">
+      Второй уровень отбора: правила ловят слово, модель — смысл. «Поддон
+      деревянный» и «поддон печи закалочной» пишутся одинаково, а нужен только
+      второй. Без ключа отбор работает на правилах, и лоты помечаются
+      «моделью не проверено».
+    </p>
+    <label class="inline"><input type="checkbox" id="s-judge"> проверять лоты моделью</label>
+    <label>Ключ OpenRouter
+      <input type="password" id="s-key" placeholder="sk-or-v1-…" autocomplete="off">
+    </label>
+    <label>Модель
+      <input type="text" id="s-model" list="model-list" placeholder="автор/модель">
+      <datalist id="model-list"></datalist>
+    </label>
+    <p class="muted small">
+      <button type="button" id="load-models" class="ghost small-btn">показать бесплатные</button>
+      подтянет список с OpenRouter — набор бесплатных моделей меняется.
+    </p>
+    <div id="models-status"></div>
 
     <h3>Пороги оценки, $ за кг</h3>
     <p class="muted small">Работает с шага 3, когда масса читается с чертежа.

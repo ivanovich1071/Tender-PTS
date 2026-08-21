@@ -28,3 +28,6 @@ recon/out/
 .DS_Store
 Thumbs.db
 *.log
+
+# Локальные настройки Claude Code — там бывают ключи.
+.claude/settings.local.json

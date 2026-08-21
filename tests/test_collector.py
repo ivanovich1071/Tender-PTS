@@ -42,6 +42,9 @@ class Working:
 
 def test_broken_source_does_not_stop_the_run(monkeypatch, tmp_path):
     monkeypatch.setattr(collector.store, "DB", tmp_path / "t.db")
+    # Второй уровень отбора здесь ни при чём, а ключ у запускающего может быть
+    # настоящим — в сеть из теста не ходим.
+    monkeypatch.setattr(collector.judge, "configured", lambda cfg: False)
     monkeypatch.setattr(collector, "build_sources", lambda cfg: [Broken(), Working()])
 
     stats = collector.collect()
@@ -52,3 +55,27 @@ def test_broken_source_does_not_stop_the_run(monkeypatch, tmp_path):
     assert stats["sources"]["broken"]["saved"] == 0
     assert any("403" in e for e in stats["errors"])
     assert stats["calls"] == 10          # 3 сломанной + 7 рабочей
+
+
+def test_dismissed_lot_does_not_come_back(monkeypatch, tmp_path):
+    """Выброшенное оператором не возвращается следующим прогоном.
+
+    Иначе ручная чистка списка обнулялась бы каждым сбором, и смысла в ней
+    не было бы никакого.
+    """
+    monkeypatch.setattr(collector.store, "DB", tmp_path / "t.db")
+    monkeypatch.setattr(collector, "build_sources", lambda cfg: [Working()])
+    monkeypatch.setattr(collector.judge, "configured", lambda cfg: False)
+
+    assert collector.collect()["saved_lots"] == 1
+
+    conn = collector.store.connect()
+    key = collector.store.lot_key(
+        "ОАО «Тест»", 'Объемная штамповка из стали "Шестерня" №56', "25.50.12.300")
+    collector.store.dismiss(conn, key, "ОАО «Тест»", "Шестерня №56")
+    conn.commit()
+    conn.close()
+
+    stats = collector.collect()
+    assert stats["saved_lots"] == 0
+    assert stats["dismissed"] == 1

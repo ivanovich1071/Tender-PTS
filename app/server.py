@@ -10,8 +10,8 @@ from pathlib import Path
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 
-from app import (calendar_by, documents, jobs, logs, profile as profile_mod,
-                 settings, store)
+from app import (calendar_by, documents, jobs, judge, logs,
+                 profile as profile_mod, settings, store)
 
 WEB = Path(__file__).resolve().parent / "web"
 
@@ -45,7 +45,9 @@ def state() -> dict:
               (SELECT COUNT(*) FROM purchases) AS purchases,
               (SELECT COUNT(*) FROM lots WHERE kind='supply') AS lots,
               (SELECT COUNT(*) FROM lots l LEFT JOIN decisions d ON d.lot_id=l.id
-                WHERE l.kind='supply' AND d.decision IS NULL) AS new
+                WHERE l.kind='supply' AND d.decision IS NULL
+                  AND (l.verdict IS NULL OR l.verdict <> 'off')) AS new,
+              (SELECT COUNT(*) FROM lots WHERE kind='supply' AND verdict='off') AS off
         """).fetchone())
         last = store.last_run(conn)
     finally:
@@ -121,6 +123,56 @@ async def lot_decision(lot_id: str, request: Request) -> dict:
     finally:
         conn.close()
     return {"ok": True}
+
+
+@app.post("/api/lots/bulk")
+async def lots_bulk(request: Request) -> dict:
+    """Массовые действия над выделенными лотами.
+
+    Три действия: «мимо профиля», «вернуть в профиль» и «удалить». Первые два —
+    поправка вердикта, и она сильнее модели: решение оператора запоминается по
+    содержанию лота и переживает пересбор. Удаление тоже не забывается, иначе
+    следующий прогон принёс бы тот же мусор обратно.
+
+    Всё пишется в журнал: по нему видно, на чём модель ошибается.
+    """
+    body = await request.json()
+    ids = [str(i) for i in (body.get("ids") or [])]
+    action = str(body.get("action", ""))
+    if not ids or action not in {"off", "fit", "delete"}:
+        return JSONResponse({"error": "не указаны лоты или действие"}, status_code=400)
+
+    conn = store.connect()
+    try:
+        done = 0
+        for lot_id in ids:
+            row = store.lot(conn, lot_id)
+            if not row:
+                continue
+            key = store.lot_key(row["organizer"], row["title"], row["okpb"])
+            title = (row["title"] or "")[:80]
+            was = row.get("verdict_by") == "модель" and row.get("verdict") or ""
+            if action == "delete":
+                store.dismiss(conn, key, row["organizer"] or "", row["title"] or "")
+                conn.execute("DELETE FROM lots WHERE id = ?", (lot_id,))
+                logs.log.info("оператор удалил лот · %s · %s",
+                              (row["organizer"] or "")[:40], title)
+            else:
+                why = "решение оператора"
+                store.save_verdict(conn, key, action, why, "оператор", "",
+                                   row["title"] or "", row["organizer"] or "")
+                store.apply_verdict(conn, lot_id, action, why, "оператор")
+                logs.log.info("оператор: %s · %s · %s",
+                              judge.RU[action], (row["organizer"] or "")[:40], title)
+                if was and was != action:
+                    logs.log.warning(
+                        "расхождение с моделью: модель — %s, оператор — %s · %s",
+                        judge.RU.get(was, was), judge.RU[action], title)
+            done += 1
+        conn.commit()
+    finally:
+        conn.close()
+    return {"ok": True, "count": done}
 
 
 @app.post("/api/files/{purchase_id}/{idx}/download")
@@ -218,12 +270,30 @@ def diagnostics() -> dict:
 
 @app.get("/api/settings")
 def settings_get() -> dict:
-    return settings.read()
+    """Настройки для интерфейса. Ключ модели наружу отдаётся маскированным."""
+    cfg = settings.read()
+    cfg["openrouter_key"] = judge.mask_key((cfg.get("openrouter_key") or "").strip())
+    return cfg
 
 
 @app.put("/api/settings")
 async def settings_put(request: Request) -> dict:
-    return settings.write(await request.json())
+    body = await request.json()
+    # В поле ключа лежит маска, если оператор его не трогал, — не затираем.
+    if "openrouter_key" in body and "…" in str(body["openrouter_key"]):
+        body.pop("openrouter_key")
+    saved = settings.write(body)
+    saved["openrouter_key"] = judge.mask_key((saved.get("openrouter_key") or "").strip())
+    return saved
+
+
+@app.get("/api/models")
+def models() -> dict:
+    """Бесплатные модели OpenRouter — списком с самой площадки."""
+    try:
+        return {"models": judge.free_models(settings.read())}
+    except Exception as e:
+        return {"models": [], "error": f"{type(e).__name__}: {str(e)[:120]}"}
 
 
 def _fmt(ms) -> str:

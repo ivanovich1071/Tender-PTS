@@ -91,9 +91,11 @@ def run_result(stats: dict) -> None:
     for name, source in (stats.get("sources") or {}).items():
         log.info("итог %s: закупок %s, с подходящими лотами %s",
                  name, source.get("actual"), source.get("saved"))
-    log.info("итог: лотов %s, закупок %s, мимо профиля %s, запросов %s, дублей %s",
+    log.info("итог: лотов %s, закупок %s, не по словам %s, запросов %s, дублей %s",
              stats.get("saved_lots"), stats.get("saved_purchases"),
              stats.get("no_match"), stats.get("calls"), stats.get("duplicates"))
+    log.info("итог отбора: проверено %s, мимо профиля %s, снято оператором ранее %s",
+             stats.get("judged"), stats.get("off_profile"), stats.get("dismissed"))
     for warning in stats.get("warnings") or []:
         log.warning(warning)
     for error in stats.get("errors") or []:

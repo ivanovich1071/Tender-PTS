@@ -8,6 +8,7 @@ const api = async (url, opts) => {
 };
 
 const DECISIONS = { participate: 'участвуем', skip: 'пропущен' };
+const VERDICTS = { fit: 'профиль', off: 'мимо профиля', maybe: 'сомнительно' };
 const SOURCES = { gias: 'ГИАС', icetrade: 'icetrade', butb: 'БУТБ' };
 
 let decision = 'new';
@@ -25,6 +26,7 @@ async function refreshState() {
     `профиль ${p.version} · ${p.keywords} слов · ${p.groups} групп · заказчики: ${p.organizers.join(', ')}`;
   $('#c-new').textContent = s.counts.new;
   $('#c-all').textContent = s.counts.lots;
+  $('#c-off').textContent = s.counts.off;
 
   const job = s.job;
   const running = job.status === 'running';
@@ -44,6 +46,7 @@ async function refreshState() {
       .join(' · ');
     $('#job').textContent = [
       `${st.saved_lots} лотов`, bySource,
+      st.off_profile ? `мимо профиля ${st.off_profile}` : '',
       st.duplicates ? `дублей ${st.duplicates}` : '',
       `${st.calls} запросов`,
     ].filter(Boolean).join(' · ');
@@ -66,6 +69,9 @@ document.querySelectorAll('#tabs button').forEach((b) => {
     document.querySelectorAll('#tabs button').forEach((x) => x.classList.remove('on'));
     b.classList.add('on');
     decision = b.dataset.decision;
+    // На «Мимо профиля» нужно возвращать, на остальных — отсеивать.
+    $('#mark-off').hidden = decision === 'off';
+    $('#mark-fit').hidden = decision !== 'off';
     loadList();
   };
 });
@@ -81,28 +87,81 @@ function money(v) {
   return Number(v).toLocaleString('ru-RU', { maximumFractionDigits: 2 });
 }
 
+function verdictTag(r) {
+  if (!r.verdict || r.verdict === 'fit') return '';
+  const why = r.verdict_why ? ' — ' + r.verdict_why : '';
+  return `<span class="tag v-${r.verdict}" title="${esc((r.verdict_by || 'модель') + why)}">${VERDICTS[r.verdict]}</span>`;
+}
+
 async function loadList() {
   const rows = await api('/api/lots?decision=' + encodeURIComponent(decision));
   const box = $('#list');
   if (!rows.length) {
-    box.innerHTML = '<div class="empty">Пусто. Нажмите «Собрать тендеры».</div>';
+    box.innerHTML = decision === 'off'
+      ? '<div class="empty">Здесь пусто — ничего не отсеяно.</div>'
+      : '<div class="empty">Пусто. Нажмите «Собрать тендеры».</div>';
+    picked();
     return;
   }
   box.innerHTML = rows.map((r) => `
     <div class="row${currentLot === r.id ? ' on' : ''}" data-id="${r.id}">
-      <div class="title">${esc(r.title || r.purchase_title || '—')}</div>
-      <div class="meta">
-        ${deadlineTag(r)}
-        <span class="tag ${r.grp === 'Заказчик под наблюдением' ? 'watch' : 'grp'}">${esc(r.grp || '')}</span>
-        <span>${esc(short(r.organizer, 40))}</span>
-        <span>${money(r.price)} BYN${r.volume ? ' / ' + money(r.volume) + ' ' + esc(r.unit || '') : ''}</span>
-        ${r.files_count ? `<span>📎 ${r.files_count}</span>` : ''}
+      <input type="checkbox" class="pick" data-id="${r.id}">
+      <div class="row-body">
+        <div class="title">${esc(r.title || r.purchase_title || '—')}</div>
+        <div class="meta">
+          ${deadlineTag(r)}
+          ${verdictTag(r)}
+          <span class="tag ${r.grp === 'Заказчик под наблюдением' ? 'watch' : 'grp'}">${esc(r.grp || '')}</span>
+          <span>${esc(short(r.organizer, 40))}</span>
+          <span>${money(r.price)} BYN${r.volume ? ' / ' + money(r.volume) + ' ' + esc(r.unit || '') : ''}</span>
+          ${r.files_count ? `<span>📎 ${r.files_count}</span>` : ''}
+        </div>
       </div>
     </div>`).join('');
-  box.querySelectorAll('.row').forEach((el) => {
-    el.onclick = () => openLot(el.dataset.id);
+  box.querySelectorAll('.row-body').forEach((el) => {
+    el.onclick = () => openLot(el.parentElement.dataset.id);
   });
+  box.querySelectorAll('.pick').forEach((el) => { el.onchange = picked; });
+  $('#pick-all').checked = false;
+  picked();
 }
+
+// --- чистка списка руками ------------------------------------------------
+
+function chosen() {
+  return [...document.querySelectorAll('.pick:checked')].map((el) => el.dataset.id);
+}
+
+function picked() {
+  const n = chosen().length;
+  $('#picked').textContent = n ? `выбрано ${n}` : '';
+  document.querySelectorAll('.bulk-actions button').forEach((b) => { b.disabled = !n; });
+}
+
+$('#pick-all').onchange = () => {
+  const on = $('#pick-all').checked;
+  document.querySelectorAll('.pick').forEach((el) => { el.checked = on; });
+  picked();
+};
+
+async function bulk(action, confirmText) {
+  const ids = chosen();
+  if (!ids.length) return;
+  if (confirmText && !confirm(`${confirmText} (${ids.length})?`)) return;
+  await api('/api/lots/bulk', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ids, action }),
+  });
+  currentLot = null;
+  $('#card-pane').innerHTML = '<div class="empty">Выберите лот слева</div>';
+  await refreshState();
+  await loadList();
+}
+
+$('#mark-off').onclick = () => bulk('off');
+$('#mark-fit').onclick = () => bulk('fit');
+$('#drop').onclick = () => bulk('delete', 'Убрать эти лоты из списка навсегда');
 
 // --- карточка ------------------------------------------------------------
 
@@ -155,6 +214,7 @@ async function openLot(id) {
 
     <h2>Почему отобрано</h2>
     <div>${esc(r.grp || '')} — ${esc(r.reason || '')}</div>
+    ${r.verdict ? `<div class="muted small">вердикт по номенклатуре: ${esc(VERDICTS[r.verdict] || r.verdict)}${r.verdict_why ? ' — ' + esc(r.verdict_why) : ''}${r.verdict_by ? ' (' + esc(r.verdict_by) + ')' : ''}</div>` : ''}
     ${r.keywords ? `<div class="muted small">совпало: ${esc(r.keywords)}</div>` : ''}
     ${r.okpb ? `<div class="muted small">ОКПБ: ${esc(r.okpb)}</div>` : ''}
 
@@ -245,6 +305,10 @@ $('#open-settings').onclick = async () => {
   $('#s-mindays').value = s.min_working_days;
   $('#s-pause').value = s.request_pause;
   $('#s-proxy').value = s.proxy || '';
+  $('#s-judge').checked = !!s.judge;
+  $('#s-key').value = s.openrouter_key === '(не задан)' ? '' : s.openrouter_key;
+  $('#s-model').value = s.model || '';
+  $('#models-status').innerHTML = '';
   $('#src-gias').checked = !!(s.sources || {}).gias;
   $('#src-icetrade').checked = !!(s.sources || {}).icetrade;
   $('#sites-status').innerHTML = '';
@@ -277,6 +341,9 @@ $('#save-settings').onclick = async () => {
       min_working_days: Number($('#s-mindays').value),
       request_pause: Number($('#s-pause').value),
       proxy: $('#s-proxy').value.trim(),
+      judge: $('#s-judge').checked,
+      openrouter_key: $('#s-key').value.trim(),
+      model: $('#s-model').value.trim(),
       sources: { gias: $('#src-gias').checked, icetrade: $('#src-icetrade').checked },
       price_thresholds: thresholds,
       holidays: list($('#s-holidays').value),
@@ -284,6 +351,20 @@ $('#save-settings').onclick = async () => {
     }),
   });
   refreshState();
+};
+
+$('#load-models').onclick = async () => {
+  const out = $('#models-status');
+  out.innerHTML = '<div class="muted small">спрашиваю OpenRouter…</div>';
+  try {
+    const r = await api('/api/models');
+    if (r.error) { out.innerHTML = `<div class="err-text small">${esc(r.error)}</div>`; return; }
+    $('#model-list').innerHTML = r.models
+      .map((m) => `<option value="${esc(m.id)}">${esc(m.name || '')}</option>`).join('');
+    out.innerHTML = `<div class="muted small">бесплатных моделей: ${r.models.length} — список в поле «Модель»</div>`;
+  } catch (e) {
+    out.innerHTML = '<div class="err-text small">не удалось получить список</div>';
+  }
 };
 
 $('#check-sites').onclick = async () => {

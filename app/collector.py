@@ -10,7 +10,7 @@
 """
 from __future__ import annotations
 
-from app import matching, profile as profile_mod, settings, store
+from app import judge, matching, profile as profile_mod, settings, store
 from app.sources.base import SourceError
 from app.sources.gias import GiasSource
 from app.sources.icetrade import Icetrade
@@ -39,17 +39,21 @@ def collect(progress=None, cancelled=None) -> dict:
     stats = {
         "sources": {}, "saved_purchases": 0, "saved_lots": 0,
         "no_match": 0, "calls": 0, "errors": [], "warnings": [],
+        "dismissed": 0, "judged": 0, "off_profile": 0,
     }
 
     conn = store.connect()
     try:
+        # Выброшенное оператором не возвращаем: иначе ручная чистка списка
+        # обнулялась бы каждым прогоном.
+        dropped = store.dismissed_keys(conn)
         for source in build_sources(cfg):
             found = saved = 0
             try:
                 for purchase, lots, files in source.harvest(
                         prof, cfg, progress=say, cancelled=cancelled):
                     found += 1
-                    kept = _keep(conn, prof, purchase, lots, files)
+                    kept = _keep(conn, prof, purchase, lots, files, dropped, stats)
                     if kept:
                         saved += 1
                         stats["saved_purchases"] += 1
@@ -69,6 +73,16 @@ def collect(progress=None, cancelled=None) -> dict:
             if cancelled and cancelled():
                 break
         conn.commit()
+
+        # Второй уровень отбора. Правила уже сузили выдачу, дальше смысл:
+        # заказчик может быть профильным, а предмет — огнеупорной смесью.
+        say("отбор моделью")
+        verdicts = judge.review(conn, prof, cfg, progress=say)
+        stats["judged"] = verdicts["judged"] + verdicts["from_cache"]
+        stats["off_profile"] = verdicts["off"]
+        stats["calls"] += verdicts["calls"]
+        stats["errors"] += verdicts["errors"]
+
         stats["duplicates"] = store.mark_duplicates(conn)
     finally:
         conn.close()
@@ -77,19 +91,33 @@ def collect(progress=None, cancelled=None) -> dict:
     return stats
 
 
-def _keep(conn, prof, purchase: dict, lots: list[dict], files: list[dict]) -> int:
-    """Отобрать лоты закупки по профилю и записать. Возвращает число оставленных."""
+def _keep(conn, prof, purchase: dict, lots: list[dict], files: list[dict],
+          dropped: set[str], stats: dict) -> int:
+    """Отобрать лоты закупки по профилю и записать. Возвращает число оставленных.
+
+    Это первый уровень: дешёвое сито по словам, кодам и именам файлов. Оно
+    больше не выносит окончательного решения — совпадение по заказчику даёт
+    лоту право дойти до модели, а не сразу попасть в работу. Раньше так и было,
+    и в списке оказывались огнеупорные смеси и контакторы: заказчик правильный,
+    предмет чужой.
+    """
     filenames = [f["name"] or "" for f in files]
     watched = matching.match_by_organizer(
         prof, purchase.get("organizer"), purchase.get("unp"))
+    organizer = purchase.get("organizer")
 
     kept = []
     for lot in lots:
+        key = store.lot_key(organizer, lot["title"], lot["okpb"])
+        if key in dropped:
+            stats["dismissed"] += 1
+            continue
         m = matching.match_lot(
             prof, lot["title"], purchase.get("title", ""), lot["okpb"], filenames)
         if not m.matched and watched:
-            # Заказчик под наблюдением: его лоты берём и без совпадения по словам —
-            # закупки называются «Аукцион», а деталь видна только внутри лота.
+            # Заказчик под наблюдением: его лоты доводим до модели и без
+            # совпадения по словам — закупки называются «Аукцион», а деталь
+            # видна только внутри лота.
             kind = matching.classify_kind(
                 prof, f"{lot['title']} {purchase.get('title', '')}")
             m = matching.Match(True, kind, "Заказчик под наблюдением", [],
