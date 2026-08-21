@@ -28,6 +28,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import time
 
 import requests
 
@@ -36,6 +37,8 @@ from app import logs, store
 API = "https://openrouter.ai/api/v1/chat/completions"
 MODELS_API = "https://openrouter.ai/api/v1/models"
 TIMEOUT = 120
+ATTEMPTS = 3            # у бесплатных моделей 429 и 404 от провайдера — рядовое дело
+RETRY_PAUSE = 5         # секунд между попытками
 
 VERDICTS = {"fit", "off", "maybe"}
 RU = {"fit": "профиль", "off": "мимо профиля", "maybe": "сомнительно"}
@@ -206,11 +209,16 @@ def review(conn, prof, cfg: dict, progress=None) -> dict:
     """Проставить вердикты всем лотам без вердикта. Наружу не бросает."""
     stats = {"judged": 0, "from_cache": 0, "off": 0, "calls": 0, "errors": []}
 
+    # Берём и те, которых модель ещё не видела, и те, что остались без её
+    # решения: без ключа, по сбою провайдера или по молчанию в ответе. Свой
+    # вердикт «сомнительно» модель уже вынесла — его переспрашивать незачем.
     rows = [dict(r) for r in conn.execute(
         """SELECT l.id, l.title, l.okpb, p.title AS purchase_title, p.organizer,
                   p.id AS purchase_id
              FROM lots l JOIN purchases p ON p.id = l.purchase_id
-            WHERE l.kind = 'supply' AND l.verdict IS NULL""")]
+            WHERE l.kind = 'supply'
+              AND (l.verdict IS NULL
+                   OR (l.verdict = 'maybe' AND COALESCE(l.verdict_by, '') = ''))""")]
     if not rows:
         return stats
 
@@ -258,16 +266,26 @@ def review(conn, prof, cfg: dict, progress=None) -> dict:
         batch = pending[start:start + size]
         if progress:
             progress(f"отбор моделью {min(start + size, len(pending))}/{len(pending)}")
-        try:
-            answers = ask(cfg, system, batch)
-            stats["calls"] += 1
-        except Exception as e:
-            message = f"отбор: пачка {start // size + 1} не проверена — {type(e).__name__}: {str(e)[:160]}"
+        number = start // size + 1
+        answers, failure = None, ""
+        for attempt in range(1, ATTEMPTS + 1):
+            try:
+                answers = ask(cfg, system, batch)
+                stats["calls"] += 1
+                break
+            except Exception as e:
+                failure = f"{type(e).__name__}: {str(e)[:160]}"
+                if attempt < ATTEMPTS:
+                    # Провайдер под бесплатной моделью отваливается на минуту и
+                    # возвращается. Одна попытка — и пачка лотов потеряна зря.
+                    logs.log.warning("отбор: пачка %s, попытка %s — %s",
+                                     number, attempt, failure)
+                    time.sleep(RETRY_PAUSE)
+        if answers is None:
+            message = f"отбор: пачка {number} не проверена — {failure}"
             logs.log.error(message)
             stats["errors"].append(message)
-            for row in batch:
-                store.apply_verdict(conn, row["id"], "maybe",
-                                    "моделью не проверено", "")
+            # Вердикт не ставим вовсе: следующий прогон попробует эти лоты снова.
             conn.commit()
             continue
 

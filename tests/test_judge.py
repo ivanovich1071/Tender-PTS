@@ -149,7 +149,9 @@ def test_without_a_key_nothing_is_lost(tmp_path, monkeypatch):
 
 
 def test_model_failure_does_not_drop_lots(tmp_path, monkeypatch):
+    """Пачка не прошла — лоты остаются без вердикта, чтобы их переспросили."""
     conn = _db(tmp_path, monkeypatch, ["Барабан волочильный по чертежу"])
+    monkeypatch.setattr(judge.time, "sleep", lambda s: None)
 
     def fake_ask(cfg, system, batch):
         raise RuntimeError("OpenRouter ответил 429: rate limit")
@@ -158,7 +160,58 @@ def test_model_failure_does_not_drop_lots(tmp_path, monkeypatch):
     stats = judge.review(conn, PROFILE,
                          {"openrouter_key": "k", "judge": True, "model": "m"})
     assert any("429" in e for e in stats["errors"])
-    assert conn.execute("SELECT verdict FROM lots WHERE id='l1'").fetchone()[0] == "maybe"
+    assert conn.execute("SELECT verdict FROM lots WHERE id='l1'").fetchone()[0] is None
+
+
+def test_flaky_provider_is_retried(tmp_path, monkeypatch):
+    """404 от провайдера под бесплатной моделью — рядовое дело, а не приговор.
+
+    Случай из прогона 21.08: две пачки из семи упали с 404, сорок лотов
+    остались непроверенными на ровном месте.
+    """
+    conn = _db(tmp_path, monkeypatch, ["Барабан волочильный по чертежу"])
+    monkeypatch.setattr(judge.time, "sleep", lambda s: None)
+    tries = []
+
+    def fake_ask(cfg, system, batch):
+        tries.append(1)
+        if len(tries) < 3:
+            raise RuntimeError("OpenRouter ответил 404: Provider returned error")
+        return [{"n": 1, "v": "fit", "why": "деталь по чертежу"}]
+
+    monkeypatch.setattr(judge, "ask", fake_ask)
+    stats = judge.review(conn, PROFILE,
+                         {"openrouter_key": "k", "judge": True, "model": "m"})
+    assert len(tries) == 3 and stats["judged"] == 1 and not stats["errors"]
+    assert conn.execute("SELECT verdict FROM lots WHERE id='l1'").fetchone()[0] == "fit"
+
+
+def test_unjudged_lots_are_asked_again(tmp_path, monkeypatch):
+    """Лот, помеченный «не проверено», при следующем прогоне доходит до модели.
+
+    Иначе один сбой провайдера означал бы, что сорок лотов больше никогда не
+    будут разобраны.
+    """
+    conn = _db(tmp_path, monkeypatch, ["Барабан волочильный по чертежу"])
+    store.apply_verdict(conn, "l1", "maybe", "моделью не проверено", "")
+    conn.commit()
+
+    monkeypatch.setattr(judge, "ask",
+                        lambda cfg, system, batch: [{"n": 1, "v": "fit", "why": ""}])
+    judge.review(conn, PROFILE,
+                 {"openrouter_key": "k", "judge": True, "model": "m"})
+    assert conn.execute("SELECT verdict FROM lots WHERE id='l1'").fetchone()[0] == "fit"
+
+    # А вот «сомнительно» от самой модели переспрашивать незачем.
+    store.apply_verdict(conn, "l1", "maybe", "по названию не понять", "модель")
+    conn.commit()
+
+    def must_not_ask(cfg, system, batch):   # pragma: no cover
+        raise AssertionError("модель уже ответила по этому лоту")
+
+    monkeypatch.setattr(judge, "ask", must_not_ask)
+    judge.review(conn, PROFILE,
+                 {"openrouter_key": "k", "judge": True, "model": "m"})
 
 
 def test_key_never_appears_in_logs():
